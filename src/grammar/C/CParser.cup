@@ -1,0 +1,919 @@
+/********************************************************
+ *               - Pseudo RoboCode Parser -             *
+ *                 J. Jossemar Cordero R.               *
+ *              futuroing [at] gmail [dot] com          *
+ ********************************************************/
+
+package compiler.lss;
+
+import java.util.ArrayList;
+import java.util.Iterator;
+
+import java_cup.runtime.Symbol;
+
+import compiler.Core;
+import compiler.utils.*;
+
+init with
+{:
+    action_obj.symTable = this.innerTable;
+    action_obj.coreReference = this.topReference;
+:}
+
+parser code {:
+    SymbolTable innerTable;
+    Core topReference;
+    
+    public RCParser( java.io.InputStream source , SymbolTable symTable ) {
+      super(new RCLexer(source));
+      innerTable = symTable;
+      topReference = null;
+    }
+    
+    public RCParser( java.io.InputStream source , SymbolTable symTable , Core cr ) {
+      super(new RCLexer(source));
+      innerTable = symTable;
+      topReference = cr;
+    }
+    
+    
+    public RCParser(java.io.StringReader in, SymbolTable symTable, Core cr) {
+      super(new RCLexer(in));
+      innerTable = symTable;
+      topReference = cr;
+    }
+    
+    @Override
+    public void syntax_error(java_cup.runtime.Symbol cur_token){      
+      if (cur_token.value instanceof CustomSymbol){
+	System.err.println ("[Error] Syntax error: Not Expected token at [" + (((CustomSymbol)cur_token.value).getRow() + 1) + "," + (((CustomSymbol)cur_token.value).getColumn() + 1) + "] with value '"+ ((CustomSymbol)cur_token.value).getValue() +"' \n");
+      } else {
+          System.err.println("[Error] Syntax error: Not Expected token at ["+ cur_token.left + "," + cur_token.right +"] with token id " + cur_token.sym + " and value: " + cur_token.value +"\n");
+	//throw new Exception ("[Error] Syntax error: Not Expected token at ["+ cur_token.left + "," + cur_token.right +"] with token id " + cur_token.sym + " and value: " + cur_token.value +"\n");
+      }
+    }
+:}
+
+action code
+{:
+    SymbolTable symTable;
+    Core  coreReference;
+    String curScope = null;
+:}
+
+
+/*[Terminal Symbols] Operators*/
+terminal CustomSymbol<String> ID, BRACE_L, BRACE_R, CBRACE_L, CBRACE_R, BRAKET_L, BRAKET_R, SEMICOLOM, COMMA, COLOM, DOT, OP_REF;
+terminal CustomSymbol<String> OP_ASIGN, OP_ASIGN_PLUS, OP_ASIGN_MINUS, OP_ASIGN_MUL, OP_ASIGN_DIV, OP_ASIGN_MOD;
+terminal CustomSymbol<String> OP_OR, OP_AND, OP_EQUAL, OP_EQUAL_NOT, OP_LESSER_EQUAL, OP_GREATER_EQUAL,OP_GREATER, OP_LESSER;
+terminal CustomSymbol<String> OP_NOT,OP_MINUS;
+terminal CustomSymbol<String> OP_PLUS,OP_DIV,OP_MUL,OP_MOD;
+terminal CustomSymbol<String> OP_DEC,OP_INC;
+
+/*[Terminal Symbols] Values*/
+terminal String  VALUE_NULL;
+terminal CustomSymbol<Boolean> VALUE_BOOLEAN;
+terminal CustomSymbol<String>  VALUE_STRING;
+terminal CustomSymbol<Integer> VALUE_INT;
+terminal CustomSymbol<Float>   VALUE_FLOAT;
+
+/*[Terminal Symbols] Reserved Words*/
+terminal CustomSymbol<String> KEYWORD_IMPORT, KEYWORD_CLASS, KEYWORD_EXTENDS, KEYWORD_STATIC,KEYWORD_NEW, KEYWORD_PUBLIC, KEYWORD_PRIVATE, KEYWORD_PROTECTED;
+terminal CustomSymbol<String> KEYWORD_IF, KEYWORD_ELSE;
+terminal CustomSymbol<String> KEYWORD_SWITCH, KEYWORD_CASE, KEYWORD_BREAK, KEYWORD_DEFAULT;
+terminal CustomSymbol<String> KEYWORD_DO, KEYWORD_FOR, KEYWORD_WHILE;
+terminal CustomSymbol<String> KEYWORD_RETURN;
+
+terminal Symbol TYPE_INT, TYPE_FLOAT, TYPE_BOOL, TYPE_STRING, TYPE_VOID, TYPE_CHAR; //Type of value
+
+/*[NON Terminal Symbols]*/
+non terminal INIT, CLASSES;
+
+non terminal Integer VISUAL_MODIFIER;
+non terminal ArrayList<SemanticWrapper>	FUNCTIONS;
+non terminal ArrayList<CustomSymbol>	PARAMETER_LIST;
+
+non terminal CustomSymbol 		TYPE,ELEMENTAL_TYPE,LITERAL, $ID; // $ID is a fix to handle the pure java_cup.runtime.Symbol
+non terminal CustomSymbol<String> 	VARIABLE_RETRIEVAL, ASIGN_CASES, PARAMETER;
+
+non terminal SemanticWrapper	PROGRAM_SEGMENT, SEGMENTS, OPEN_STATEMENT, CLOSED_STATEMENT, SIMPLE_STATEMENT,SWITCH_CASE_BODY;
+
+non terminal SemanticWrapper	FUNCTION_SEGMENT, SEGMENT;
+non terminal SemanticWrapper	IF_STMT, SWITCH_BEGIN, SWITCH_STMT, CASE_DEF;
+non terminal SemanticWrapper 	WHILE_STMT, FOR_BEGIN, FOR_CHECK, FOR_LAST;
+non terminal SemanticWrapper 	VARIABLE_ASSIGNMENT,VARIABLE_ASSIGNMENT_L0; 
+
+non terminal String 		VARIABLE_ASSIGNMENT_L1,VARIABLE_ASSIGNMENT_L2,IMPORT_TRAIL;
+
+non terminal String PREFIX_EXPRESSION, COMPARISSON_EXPRESSION,EXPRESSION,EXPRESSION_LIST;
+non terminal String ARITMETHIC_EXPRESSION,ARITMETHIC_EXPRESSION_L2;
+non terminal String INC_DEC_EXPRESSION,INC_DEC_EXPRESSION_L2,PRE_LOW_LEVEL_EXPRESSION,LOW_LEVEL_EXPRESSION;
+
+start with INIT;
+
+INIT ::= CLASSES {::}
+;
+
+CLASSES ::= CLASSES VISUAL_MODIFIER:vmod KEYWORD_CLASS $ID:classID CBRACE_L FUNCTIONS:sems CBRACE_R {:
+	      int classWeight = 0;
+	      //remember sems is an LikedList with function definition and symbol declartion
+	      Iterator<SemanticWrapper> iterator = sems.iterator();
+	      while (iterator.hasNext()) {
+		SemanticWrapper sem = iterator.next();
+		
+		if( sem.getExecName() != null ){ //Is a function definition
+		  //setFunction
+		  boolean asStatic  = sem.isStatic();
+		  int weight = sem.getSymbolCount();
+		  String fsign = symTable.setFunction ( asStatic ? null : classID.toString(), sem.getExecName(), sem.getExecReturnType(), sem.getExecHeadAccess(), sem.getExecParams (), sem.getExec() , weight );
+		  //write function symbols
+		  symTable.writeSymbols( sem , fsign, asStatic ? null : classID.toString(), sem.getExecName(), false, sem.getExecParamsCount() );
+		  
+		}else{ //Is a Class Symbol Declaration
+		  //write symbols
+		  symTable.writeSymbols( sem , classID.toString(), classID.toString(), null, false );
+		  classWeight += sem.getSymbolCount();
+		}
+		
+		symTable.setClassDefinition( classID.toString() , classWeight, vmod);
+	      }
+	    :}
+	    | CLASSES VISUAL_MODIFIER:vmod KEYWORD_CLASS $ID:child KEYWORD_EXTENDS $ID:parent CBRACE_L FUNCTIONS:sems CBRACE_R {:
+	      //inherit
+	      symTable.inheritFrom( child.toString() , parent.toString() );
+	      //then write own symbols / functions
+	      int classWeight = 0;
+	      //remember sems is an LikedList with function definition and symbol declartion
+	      Iterator<SemanticWrapper> iterator = sems.iterator();
+	      while (iterator.hasNext()) {
+		SemanticWrapper sem = iterator.next();
+		
+		if( sem.getExecName() != null ){ //Is a function definition
+		  //setFunction
+		  boolean asStatic  = sem.isStatic();
+		  int weight = sem.getSymbolCount();
+		  String fsign = symTable.setFunction ( asStatic ? null : child.toString(), sem.getExecName(), sem.getExecReturnType(), sem.getExecHeadAccess(), sem.getExecParams (), sem.getExec() , weight );
+		  //write function symbols
+		  symTable.writeSymbols( sem , fsign, asStatic ? null : child.toString(), sem.getExecName(), false, sem.getExecParamsCount() );
+		  
+		}else{ //Is a Class Symbol Declaration
+		  //write symbols
+		  symTable.writeSymbols( sem , child.toString(), child.toString(), null, false );
+		  classWeight += sem.getSymbolCount();
+		}
+		
+		classWeight = symTable.getSymbolClassCount( child.toString() );
+		symTable.setClassDefinition( child.toString() , classWeight, vmod);
+	      }
+	    :}
+	    | VISUAL_MODIFIER:vmod KEYWORD_CLASS $ID:classID CBRACE_L FUNCTIONS:sems CBRACE_R {:
+	      int classWeight = 0;
+	      //remember sems is an LikedList with function definition and symbol declartion
+	      Iterator<SemanticWrapper> iterator = sems.iterator();
+	      while (iterator.hasNext()) {
+		SemanticWrapper sem = iterator.next();
+		
+		if( sem.getExecName() != null ){ //Is a function definition
+		  //setFunction
+		  boolean asStatic  = sem.isStatic();
+		  int weight = sem.getSymbolCount();
+		  String fsign = symTable.setFunction ( asStatic ? null : classID.toString(), sem.getExecName(), sem.getExecReturnType(), sem.getExecHeadAccess(), sem.getExecParams (), sem.getExec() , weight );
+		  //write function symbols
+		  symTable.writeSymbols( sem , fsign, asStatic ? null : classID.toString(), sem.getExecName(), false, sem.getExecParamsCount() );
+		  
+		}else{ //Is a Class Symbol Declaration
+		  //write symbols
+		  symTable.writeSymbols( sem , classID.toString(), classID.toString(), null, false );
+		  classWeight += sem.getSymbolCount();
+		}
+		
+		symTable.setClassDefinition( classID.toString() , classWeight, vmod);
+	      }
+	    :}
+	    | VISUAL_MODIFIER:vmod KEYWORD_CLASS $ID:child KEYWORD_EXTENDS $ID:parent CBRACE_L FUNCTIONS:sems CBRACE_R {:
+	      //inherit
+	      symTable.inheritFrom( child.toString() , parent.toString() );
+	      //then write own symbols / functions
+	      int classWeight = 0;
+	      //remember sems is an LikedList with function definition and symbol declartion
+	      Iterator<SemanticWrapper> iterator = sems.iterator();
+	      while (iterator.hasNext()) {
+		SemanticWrapper sem = iterator.next();
+		
+		if( sem.getExecName() != null ){ //Is a function definition
+		  //setFunction
+		  boolean asStatic  = sem.isStatic();
+		  int weight = sem.getSymbolCount();
+		  String fsign = symTable.setFunction ( asStatic ? null : child.toString(), sem.getExecName(), sem.getExecReturnType(), sem.getExecHeadAccess(), sem.getExecParams (), sem.getExec() , weight );
+		  //write function symbols
+		  symTable.writeSymbols( sem , fsign, asStatic ? null : child.toString(), sem.getExecName(), false, sem.getExecParamsCount() );
+		  
+		}else{ //Is a Class Symbol Declaration
+		  //write symbols
+		  symTable.writeSymbols( sem , child.toString(), child.toString(), null, false );
+		  classWeight += sem.getSymbolCount();
+		}
+		classWeight = symTable.getSymbolClassCount( child.toString() );
+		symTable.setClassDefinition( child.toString() , classWeight, vmod);
+	      }
+	    :}
+	    | CLASSES KEYWORD_IMPORT IMPORT_TRAIL:it SEMICOLOM {: coreReference.parseSibling( it ); :}
+	    | KEYWORD_IMPORT IMPORT_TRAIL:it SEMICOLOM {: coreReference.parseSibling( it ); :}
+;
+
+IMPORT_TRAIL ::=  IMPORT_TRAIL:trail DOT $ID:id {: RESULT = trail + "." + id.toString(); :}
+		| $ID:id {: RESULT = id.toString(); :}
+;
+
+VISUAL_MODIFIER ::= KEYWORD_PUBLIC {:
+		      RESULT = new Integer( SymbolTable.ACCESS_PUBLIC );
+		    :}
+		    | KEYWORD_PROTECTED {:
+		      RESULT = new Integer( SymbolTable.ACCESS_PROTECTED );
+		    :}
+		    | KEYWORD_PRIVATE {:
+		      RESULT = new Integer( SymbolTable.ACCESS_PRIVATE );
+		    :}
+;
+
+FUNCTIONS ::= FUNCTIONS:f FUNCTION_SEGMENT:s{:
+		 RESULT = f == null ? new ArrayList<SemanticWrapper>() : f;
+		 RESULT.add(s);
+	      :}
+	      | FUNCTION_SEGMENT:s{:
+		RESULT = new ArrayList<SemanticWrapper>();
+		RESULT.add(s);
+	      :}
+;
+
+FUNCTION_SEGMENT ::= VISUAL_MODIFIER:vmod TYPE:t $ID:fid BRACE_L BRACE_R CBRACE_L SEGMENTS:s CBRACE_R {: 
+			  s.setFunctionMeta( t.getType(), fid.toString(), vmod , null );
+			  s.setFunctionWeight( s.getSymbolCount() );
+			  RESULT = s ;
+		      :}
+		      | VISUAL_MODIFIER:vmod TYPE:t $ID:fid BRACE_L PARAMETER_LIST:pl BRACE_R CBRACE_L SEGMENTS:s CBRACE_R {:
+			  s.setFunctionMeta( t.getType(), fid.toString(), vmod , pl );
+			  s.setFunctionWeight( s.getSymbolCount() );
+			  RESULT = s;
+		      :}
+		      | VISUAL_MODIFIER:vmod KEYWORD_STATIC TYPE:t $ID:fid BRACE_L BRACE_R CBRACE_L SEGMENTS:s CBRACE_R {:
+			  s.setFunctionMeta( t.getType(), fid.toString(), vmod , null );
+			  s.setFunctionWeight( s.getSymbolCount() );
+			  s.isStatic(true);
+			  RESULT = s;
+		      :}
+		      | VISUAL_MODIFIER:vmod KEYWORD_STATIC TYPE:t $ID:fid BRACE_L PARAMETER_LIST:pl BRACE_R CBRACE_L SEGMENTS:s CBRACE_R{:
+			  s.setFunctionMeta( t.getType(), fid.toString(), vmod , pl );
+			  s.setFunctionWeight( s.getSymbolCount() );
+			  s.isStatic(true);
+			  RESULT = s;
+		      :}
+		      | VISUAL_MODIFIER:vmod $ID:fid BRACE_L PARAMETER_LIST:pl BRACE_R CBRACE_L SEGMENTS:s CBRACE_R{:
+			  //WARNING is assuming that $ID is the same name as its class.
+			  Type tmp = Type._Object_;
+			  tmp.setSpecification( fid.toString() );
+			  s.setFunctionMeta( tmp, SymbolTable.CONSTRUCTOR_PREFIX, vmod , pl );
+			  s.setFunctionWeight( s.getSymbolCount() );
+			  RESULT = s;
+		      :}
+		      | VISUAL_MODIFIER:vmod $ID:fid BRACE_L BRACE_R CBRACE_L SEGMENTS:s CBRACE_R{:
+			  //WARNING is assuming that $ID is the same name as its class.
+			  Type tmp = Type._Object_;
+			  tmp.setSpecification( fid.toString() );
+			  s.setFunctionMeta( tmp, SymbolTable.CONSTRUCTOR_PREFIX, vmod , null );
+			  s.setFunctionWeight( s.getSymbolCount() );
+			  RESULT = s;
+		      :}
+		      | SEGMENT:s{:
+			RESULT = s;
+		      :}
+;
+
+PARAMETER_LIST ::= PARAMETER_LIST:ar COMMA PARAMETER:id {:
+		      RESULT = ar==null ?new ArrayList<CustomSymbol>() : ar ;
+		      RESULT.add( id );
+		  :}
+		  | PARAMETER:id {:
+		      RESULT = new ArrayList<CustomSymbol>();
+		      RESULT.add( id );
+		  :}
+;
+
+PARAMETER ::= TYPE:t $ID:id {: RESULT = new CustomSymbol<String>( id , id.toString(), t.getType() ); :}
+	      | TYPE:t OP_REF $ID:id {: RESULT = new CustomSymbol<String>( id , "&" + id.toString(), t.getType() ); :}
+;
+
+SEGMENTS ::= SEGMENTS:sw SEGMENT:sg{:
+		if(sw==null){
+		  sw = new SemanticWrapper();
+		  sw.setExec(new ExecNode(Type.segment_holder,null));
+		}
+		if(sg!=null && sw.getExec().getStatementType() == Type.segment_holder)
+		  sw.appendSemanticWrapper( sg );
+		else if (sg!=null){
+		  sw.setExec(new ExecNode(Type.segment_holder,null));
+		  sw.appendSemanticWrapper( sg );
+		}
+		RESULT = sw;
+	    :}
+	    |SEGMENT:sg{:	      
+	      ExecNode ex = new ExecNode(Type.segment_holder,null);
+	      SemanticWrapper temp = new SemanticWrapper();
+	      temp.setExec(ex);
+	      temp.appendSemanticWrapper(sg);
+	      
+	      RESULT = (sg!=null)? temp : null;
+	    :}
+;
+
+SEGMENT ::=  PROGRAM_SEGMENT:s {:
+		RESULT = s;
+	    :}
+	    | SEMICOLOM {: 
+	      RESULT = new SemanticWrapper();
+	    :}
+;
+
+PROGRAM_SEGMENT ::= OPEN_STATEMENT:o {:
+		    RESULT = o;
+		:}
+		| CLOSED_STATEMENT:c {:
+		    RESULT = c;
+		:}
+		| VISUAL_MODIFIER:vmod TYPE:t VARIABLE_RETRIEVAL:var{:
+		    //var define . append to symbol table
+
+		    SemanticWrapper sw = new SemanticWrapper();
+		    sw.addSymbol(new CustomSymbol<String>(t.getRow(),t.getColumn(), t.getType(), var.getValue()), vmod );
+
+		    RESULT = sw;
+		:}
+		| TYPE:t VARIABLE_RETRIEVAL:var{:
+		    //var define . append to symbol table
+
+		    SemanticWrapper sw = new SemanticWrapper();
+		    sw.addSymbol(new CustomSymbol<String>(t.getRow(),t.getColumn(), t.getType(), var.getValue()), SymbolTable.ACCESS_FRIENDLY );
+
+		    RESULT = sw;
+		:}
+;
+
+OPEN_STATEMENT ::= IF_STMT:sw PROGRAM_SEGMENT:sg {:
+		      SemanticWrapper t = new SemanticWrapper();
+		      ExecNode if_child = new ExecNode(Type.segment_holder , null );
+		      t.setExec(if_child);
+		      t.appendSemanticWrapper( sg , true );
+		      
+		      sw.appendSemanticWrapper( t );
+		      
+		      RESULT = sw;
+		  :}
+		  | IF_STMT:sw CLOSED_STATEMENT:sg KEYWORD_ELSE OPEN_STATEMENT:sg2 {:
+		      ExecNode if_child = new ExecNode(Type.segment_holder, null );
+		      SemanticWrapper t = new SemanticWrapper();		      
+		      t.setExec(if_child);
+		      t.appendSemanticWrapper( sg , true );
+		      
+		      sw.appendSemanticWrapper( t );
+		      		      		      
+		      ExecNode ex = new ExecNode(Type.stmt_else, null);
+		      SemanticWrapper temp = new SemanticWrapper();
+		      temp.setExec(ex);
+		      temp.appendSemanticWrapper( sg2, true );
+		      
+		      sw.appendSemanticWrapper( temp );
+		      RESULT = sw;
+		  :}
+		  | WHILE_STMT:sw OPEN_STATEMENT:sg {:
+		      if(sg != null)
+			sw.appendSemanticWrapper( sg );
+		      sw.getExec().setStatementType( Type.stmt_while );
+		      RESULT = sw;
+		  :}
+		  | KEYWORD_DO OPEN_STATEMENT:sg WHILE_STMT:sw  {:
+		      if(sg != null)
+			sw.appendSemanticWrapper( sg );
+		      sw.getExec().setStatementType( Type.stmt_do );
+		      RESULT = sw;
+		  :}
+		  
+		  | FOR_LAST:sw OPEN_STATEMENT:sg {:
+		      SemanticWrapper t = new SemanticWrapper();
+		      ExecNode for_child = new ExecNode(Type.stmt_for_child , null );
+		      t.setExec(for_child);
+		      t.appendSemanticWrapper( sg , true );
+		      
+		      sw.appendSemanticWrapper( t );
+		      RESULT = sw;
+		  :}
+;
+
+CLOSED_STATEMENT ::= SIMPLE_STATEMENT:sw {:
+		RESULT = sw;
+	    :}
+	    | IF_STMT:sw CLOSED_STATEMENT:sg KEYWORD_ELSE CLOSED_STATEMENT:sg2 {:
+		ExecNode if_child = new ExecNode(Type.segment_holder, null );
+		SemanticWrapper t = new SemanticWrapper();		      
+		t.setExec(if_child);
+		t.appendSemanticWrapper( sg , true );
+		
+		sw.appendSemanticWrapper( t );
+		
+		ExecNode ex = new ExecNode(Type.segment_holder, null);		
+		SemanticWrapper temp = new SemanticWrapper();
+		temp.setExec(ex);
+		temp.appendSemanticWrapper( sg2, true );
+		
+		sw.appendSemanticWrapper( temp );
+		RESULT = sw;
+	    :}
+	    | WHILE_STMT:sw CLOSED_STATEMENT:sg  {:
+		//sw = sw != null ? sw : new SemanticWrapper();
+		if(sg != null)
+		  sw.appendSemanticWrapper( sg );
+		sw.getExec().setStatementType( Type.stmt_while );
+		RESULT = sw;
+	    :}
+	    | KEYWORD_DO CLOSED_STATEMENT:sg WHILE_STMT:sw {:
+		//sw = sw != null ? sw : new SemanticWrapper();
+		if(sg != null)
+		  sw.appendSemanticWrapper( sg );
+		sw.getExec().setStatementType( Type.stmt_do );
+		RESULT = sw;
+	    :}
+	    | FOR_LAST:sw CLOSED_STATEMENT:sg {:
+		SemanticWrapper t = new SemanticWrapper();
+		ExecNode for_child = new ExecNode(Type.stmt_for_child , null );
+		t.setExec(for_child);
+		t.appendSemanticWrapper( sg , true );
+		
+		sw.appendSemanticWrapper( t );
+		RESULT = sw;
+	    :}
+;
+
+SIMPLE_STATEMENT ::= VARIABLE_ASSIGNMENT:sw {:
+		      RESULT = sw;
+		  :}
+		  | CBRACE_L SEGMENTS:sw CBRACE_R {:
+		      RESULT = sw;
+		  :}
+		  | CBRACE_L CBRACE_R {:
+		    //nothing!!!
+		  :}
+		  | SWITCH_STMT:sw KEYWORD_DEFAULT COLOM SEGMENTS:sg CBRACE_R {:
+		      //append exec SEGMENTS @ SWITCH_STMT
+		      //move up exec @ SWITCH_STMT		      
+		      ExecNode ex = new ExecNode(Type.stmt_case_default, null );
+		      SemanticWrapper temp = new SemanticWrapper();
+		      temp.setExec(ex);
+		      temp.appendSemanticWrapper( sg, true );
+		      sw.appendSemanticWrapper( temp );
+		      RESULT = sw;
+		  :}
+		  | SWITCH_STMT:sw CBRACE_R {:
+		      //move up exec @ SWITCH_STMT
+		      RESULT = sw;		      
+		  :}
+		  | $ID:fid BRACE_L BRACE_R SEMICOLOM {:  //function call
+		      //get up semactic , fcall exec
+		      SemanticWrapper sw = new SemanticWrapper( );
+		      ExecNode ex = new ExecNode(Type.stmt_fncall, null);
+		      ex.addChild( new ExecNode( Type.id, fid.toString() ) );
+		      sw.setExec( ex );
+		      RESULT = sw;
+		  :}
+		  | $ID:fid BRACE_L EXPRESSION_LIST:cond BRACE_R SEMICOLOM {: 
+		      //get up semactic , fcall exec
+		      SemanticWrapper sw = new SemanticWrapper( );
+		      ExecNode ex = new ExecNode(Type.stmt_fncall, cond);
+		      ex.addChild( new ExecNode( Type.id, fid.toString() ) );
+		      sw.setExec( ex );
+		      RESULT = sw;
+		  :}
+		  | $ID:obj DOT $ID:fid BRACE_L BRACE_R SEMICOLOM {:  //function call
+		      //get up semactic , fcall exec
+		      SemanticWrapper sw = new SemanticWrapper( );
+		      ExecNode ex = new ExecNode(Type.stmt_fncall, null);
+		      ex.addChild( new ExecNode( Type.obj_fncall, obj.toString() +"."+ fid.toString() ) );
+		      sw.setExec( ex );
+		      RESULT = sw;
+		  :}
+		  | $ID:obj DOT $ID:fid BRACE_L EXPRESSION_LIST:cond BRACE_R SEMICOLOM {: 
+		      //get up semactic , fcall exec
+		      SemanticWrapper sw = new SemanticWrapper( );
+		      ExecNode ex = new ExecNode(Type.stmt_fncall, cond);
+		      ex.addChild( new ExecNode( Type.obj_fncall, obj.toString() +"."+ fid.toString() ) );
+		      sw.setExec( ex );
+		      RESULT = sw;
+		  :}
+
+		  
+		  | KEYWORD_RETURN SEMICOLOM {:
+		      SemanticWrapper sw = new SemanticWrapper( );
+		      ExecNode ex = new ExecNode(Type.stmt_fnret_void, null);
+		      sw.setExec( ex );
+		      RESULT = sw;
+		  :}
+		  | KEYWORD_RETURN EXPRESSION:cond SEMICOLOM {:
+		      SemanticWrapper sw = new SemanticWrapper( );
+		      ExecNode ex = new ExecNode(Type.stmt_fnret, cond);
+		      sw.setExec( ex );
+		      RESULT = sw;
+		  :}
+;
+
+IF_STMT ::= KEYWORD_IF BRACE_L EXPRESSION:cond BRACE_R {:
+		  SemanticWrapper sw = new SemanticWrapper( );
+		  ExecNode ex = new ExecNode(Type.stmt_if, cond);
+		  sw.setExec( ex );
+		  RESULT = sw;
+	      :}
+;
+
+WHILE_STMT ::= KEYWORD_WHILE BRACE_L EXPRESSION:cond BRACE_R {:
+		  SemanticWrapper sw = new SemanticWrapper( );
+		  ExecNode ex = new ExecNode(Type.stmt_while, cond);
+		  sw.setExec( ex );
+		  RESULT = sw;
+		:}
+;
+
+FOR_BEGIN ::= KEYWORD_FOR BRACE_L VARIABLE_ASSIGNMENT:va {:
+		  va.getExec().setStatementType(Type.stmt_for_asign);
+		  RESULT = va;
+	      :}
+;
+
+FOR_CHECK ::= FOR_BEGIN:bro EXPRESSION:va SEMICOLOM {:
+		  SemanticWrapper t = new SemanticWrapper();
+		  ExecNode ex = new ExecNode(Type.segment_holder, null);
+		  t.setExec(ex);
+		  t.appendSemanticWrapper( bro, true );
+		  ex = new ExecNode(Type.stmt_for_check, va);
+		  t.setExec(ex);
+		  RESULT = t;
+	      :}
+;
+
+FOR_LAST ::= FOR_CHECK:siblings VARIABLE_ASSIGNMENT_L0:va BRACE_R {:
+		  SemanticWrapper t = new SemanticWrapper();
+		  ExecNode ex = new ExecNode(Type.stmt_for, null);
+		  t.setExec(ex);
+		  t.appendSemanticWrapper( siblings, true );
+		  //WARNING Changed ex = new ExecNode(Type.stmt_for_action, va );
+		  ex = new ExecNode(Type.stmt_for_action, va.getExec().getConditionAsString() );
+		  t.setExec(ex);
+		  RESULT = t;
+	      :}
+;
+
+SWITCH_STMT ::= SWITCH_BEGIN:sw SWITCH_CASE_BODY:sg {: 
+	      //append exec here!
+	      sw.appendSemanticWrapper( sg );
+	      RESULT = sw;
+	   :}
+;
+
+SWITCH_BEGIN ::= KEYWORD_SWITCH BRACE_L EXPRESSION:cond BRACE_R CBRACE_L {: //switch ( ex ) {
+		    SemanticWrapper sw = new SemanticWrapper( );
+		    ExecNode ex = new ExecNode(Type.stmt_switch, cond);
+		    sw.setExec( ex );
+		    RESULT = sw;
+		:}
+;
+
+SWITCH_CASE_BODY ::=  SWITCH_CASE_BODY:sw CASE_DEF:ex SEGMENTS:sg KEYWORD_BREAK SEMICOLOM {:
+			//Exec to array @ SWITCH_CASE_BODY
+			//Exec copy to other @ CASE_DEF
+			//Append segments @ end
+			SemanticWrapper t = new SemanticWrapper();
+			t.setExec(ex.getExec());
+			t.appendSemanticWrapper( sg, true );
+			sw.appendSemanticWrapper(t);
+			RESULT = sw;
+		    :}
+		    | CASE_DEF:sw SEGMENTS:sg KEYWORD_BREAK SEMICOLOM {:
+			//Exec to array @ SWITCH_CASE_BODY			
+			//Append segments @ end
+			sw.appendSemanticWrapper( sg , true );
+			RESULT = sw;
+		    :}
+		    | SWITCH_CASE_BODY:sw CASE_DEF:ex SEGMENTS:sg {:
+			SemanticWrapper t = new SemanticWrapper();
+			t.setExec(ex.getExec());
+			t.appendSemanticWrapper( sg, true );
+			sw.appendSemanticWrapper(t);
+			RESULT = sw;
+		    :}
+		    | CASE_DEF:ex SEGMENTS:sg {:
+			SemanticWrapper t = new SemanticWrapper();
+			t.setExec(ex.getExec());
+			t.appendSemanticWrapper( sg, true );
+			RESULT = t;
+		    :}
+		    | SWITCH_CASE_BODY:sw CASE_DEF:ex {:
+			SemanticWrapper t = new SemanticWrapper();
+			t.setExec(ex.getExec());
+			sw.appendSemanticWrapper(t);
+			RESULT = t;
+		    :}
+		    | CASE_DEF:ex {:
+			SemanticWrapper t = new SemanticWrapper();
+			t.setExec(ex.getExec());
+			RESULT = t;
+		    :}
+;
+
+CASE_DEF ::= KEYWORD_CASE LITERAL:cond COLOM {: //case op :
+			SemanticWrapper sw = new SemanticWrapper( );
+			ExecNode ex = new ExecNode(Type.stmt_case, cond, true);
+			sw.setExec( ex );
+			RESULT = sw;
+		      :}
+;
+
+ASIGN_CASES ::= OP_ASIGN		{: Symbol t = (Symbol) CUP$RCParser$stack.peek(); RESULT = new CustomSymbol ( t, t.value.toString(), Type.stmt_asign ) ; :}
+		| OP_ASIGN_PLUS		{: Symbol t = (Symbol) CUP$RCParser$stack.peek(); RESULT = new CustomSymbol ( t, t.value.toString(), Type.stmt_asign_plus ) ; :}
+		| OP_ASIGN_MINUS	{: Symbol t = (Symbol) CUP$RCParser$stack.peek(); RESULT = new CustomSymbol ( t, t.value.toString(), Type.stmt_asign_minus ) ; :}
+		| OP_ASIGN_MUL		{: Symbol t = (Symbol) CUP$RCParser$stack.peek(); RESULT = new CustomSymbol ( t, t.value.toString(), Type.stmt_asign_times ) ; :}
+		| OP_ASIGN_DIV		{: Symbol t = (Symbol) CUP$RCParser$stack.peek(); RESULT = new CustomSymbol ( t, t.value.toString(), Type.stmt_asign_div ) ; :}
+		| OP_ASIGN_MOD 		{: Symbol t = (Symbol) CUP$RCParser$stack.peek(); RESULT = new CustomSymbol ( t, t.value.toString(), Type.stmt_asign_mod ) ; :}
+;
+
+VARIABLE_ASSIGNMENT ::= VISUAL_MODIFIER:vmod TYPE:t VARIABLE_RETRIEVAL:var ASIGN_CASES:asign EXPRESSION:cond SEMICOLOM {:
+			  SemanticWrapper sw = new SemanticWrapper();
+			  sw.addSymbol(new CustomSymbol<String>(tleft,tright, t.getType(), var.getValue()), vmod );
+			  
+			  ExecNode ex = new ExecNode(asign.getType(), cond);
+			  
+			  ex.addChild( new ExecNode(var.getType(), var, true) ); //first child is the insert value
+			  
+			  sw.setExec( ex );
+			  RESULT = sw;
+		      :}
+		      | TYPE:t VARIABLE_RETRIEVAL:var ASIGN_CASES:asign EXPRESSION:cond SEMICOLOM {:
+			  SemanticWrapper sw = new SemanticWrapper();
+			  
+			  sw.addSymbol(new CustomSymbol<String>(t.getRow(),t.getColumn(),t.getType(), var.getValue()));
+			  
+			  ExecNode ex = new ExecNode(asign.getType(), cond);
+			  
+			  ex.addChild( new ExecNode(var.getType(), var, true) ); //first child is the insert value
+			  
+			  sw.setExec( ex );
+			  RESULT = sw;
+		      :}
+		      | VARIABLE_ASSIGNMENT_L0:va SEMICOLOM {:
+			  RESULT = va;
+		      :}
+;
+
+VARIABLE_ASSIGNMENT_L0 ::= VARIABLE_RETRIEVAL:var ASIGN_CASES:asign EXPRESSION:cond {:
+			      SemanticWrapper sw = new SemanticWrapper( );
+			      ExecNode ex = new ExecNode(asign.getType(), cond);
+			      ex.addChild( new ExecNode(var.getType(), var, true ) ); //first child is the insert value
+			      sw.setExec( ex );
+			      RESULT = sw;
+			  :}
+			  | $ID:obj DOT $ID:att ASIGN_CASES:asign EXPRESSION:cond {:
+			      SemanticWrapper sw = new SemanticWrapper( );
+			      ExecNode ex = new ExecNode(asign.getType(), cond);
+			      ex.addChild( new ExecNode( Type.obj_att, obj+"."+att ) );
+			      sw.setExec( ex );
+			      RESULT = sw;			    
+			  :}
+			  | VARIABLE_ASSIGNMENT_L1:cond {:
+			      //Means an "expression" as exec. node
+			      SemanticWrapper sw = new SemanticWrapper( );
+			      ExecNode ex = new ExecNode(Type.stmt_stand_alone_exp, cond);			  
+			      sw.setExec( ex );
+			      RESULT = sw;
+			  :}
+;
+
+VARIABLE_ASSIGNMENT_L1 ::=  VARIABLE_RETRIEVAL:v OP_INC {:
+			      RESULT = v+"++";
+			  :}
+			  | VARIABLE_RETRIEVAL:v OP_DEC {:
+			      RESULT = v+"--";
+			  :}
+			  | VARIABLE_ASSIGNMENT_L2:va {:
+			      RESULT = va;
+			  :}
+;
+
+VARIABLE_ASSIGNMENT_L2 ::= OP_INC VARIABLE_RETRIEVAL:v {:
+			      RESULT = "++"+v;
+			  :}
+			  | OP_DEC VARIABLE_RETRIEVAL:v {:
+			      RESULT = "--"+v;
+			  :}
+;
+
+EXPRESSION ::= EXPRESSION:e1 OP_AND COMPARISSON_EXPRESSION:e2 {:
+		RESULT = e1 + "AND" + e2 ;
+	    :}
+	    | EXPRESSION:e1 OP_OR COMPARISSON_EXPRESSION:e2 {:
+		RESULT = e1 + "OR" + e2 ;
+	    :}
+	    | COMPARISSON_EXPRESSION:e2 {:
+		RESULT = e2;
+	    :}
+;
+
+COMPARISSON_EXPRESSION ::= COMPARISSON_EXPRESSION:e1 OP_EQUAL ARITMETHIC_EXPRESSION:e2 {:
+			      RESULT = e1 + "==" + e2 ;
+			  :}
+			  | COMPARISSON_EXPRESSION:e1 OP_LESSER ARITMETHIC_EXPRESSION:e2 {:
+			      RESULT = e1 + "<=" + e2 ;
+			  :}
+			  | COMPARISSON_EXPRESSION:e1 OP_LESSER_EQUAL ARITMETHIC_EXPRESSION:e2 {:
+			      RESULT = e1 + "<=" + e2 ;
+			  :}
+			  | COMPARISSON_EXPRESSION:e1 OP_GREATER ARITMETHIC_EXPRESSION:e2 {:
+			      RESULT = e1 + ">" + e2 ;
+			  :}
+			  | COMPARISSON_EXPRESSION:e1 OP_GREATER_EQUAL ARITMETHIC_EXPRESSION:e2 {:
+			      RESULT = e1 + ">=" + e2 ;
+			  :}
+			  | COMPARISSON_EXPRESSION:e1 OP_EQUAL_NOT ARITMETHIC_EXPRESSION:e2 {:
+			      RESULT = e1 + "!=" + e2 ;
+			  :}
+			  | ARITMETHIC_EXPRESSION:e2 {:
+			      RESULT = e2;
+			  :}
+;
+
+ARITMETHIC_EXPRESSION ::= ARITMETHIC_EXPRESSION:e1 OP_PLUS ARITMETHIC_EXPRESSION_L2:e2 {:
+			      RESULT = e1 + "+" + e2;
+			  :}
+			  | ARITMETHIC_EXPRESSION:e1 OP_MINUS ARITMETHIC_EXPRESSION_L2:e2 {:
+			      RESULT = e1 + "-" + e2;
+			  :}
+			  | ARITMETHIC_EXPRESSION_L2:e2 {:
+			      RESULT = e2;
+			  :}
+;
+
+ARITMETHIC_EXPRESSION_L2 ::= ARITMETHIC_EXPRESSION_L2:e1 OP_MUL PREFIX_EXPRESSION:e2 {:
+			      RESULT = e1 + "*" + e2;
+			  :}
+			  | ARITMETHIC_EXPRESSION_L2:e1 OP_DIV PREFIX_EXPRESSION:e2 {:
+			      RESULT = e1 + "/" + e2;
+			  :}
+			  | ARITMETHIC_EXPRESSION_L2:e1 OP_MOD PREFIX_EXPRESSION:e2 {:
+			      RESULT = e1 + "%" + e2;
+			  :}
+			  | PREFIX_EXPRESSION:e2 {:
+			      RESULT = e2;
+			  :}
+;
+			  
+PREFIX_EXPRESSION ::= OP_NOT INC_DEC_EXPRESSION_L2:e1 {:
+			RESULT = "! " + e1;
+		    :}
+		    | OP_MINUS INC_DEC_EXPRESSION:e1 {:
+		      RESULT = "-" + e1;
+		    :}
+		    | INC_DEC_EXPRESSION:e1 {:
+		      RESULT = e1;
+		    :}
+;
+
+INC_DEC_EXPRESSION_L2 ::= OP_INC VARIABLE_RETRIEVAL:v {:
+			    RESULT = v+"++";
+			:}
+			| OP_DEC VARIABLE_RETRIEVAL:v {:
+			    RESULT = v+"--";
+			:}
+			| INC_DEC_EXPRESSION:e1 {:
+			    RESULT = e1;
+			:}
+;
+
+INC_DEC_EXPRESSION ::= VARIABLE_RETRIEVAL:v OP_INC {:
+			RESULT = v + "++" ;
+		    :}
+		    | VARIABLE_RETRIEVAL:v OP_DEC {:
+			RESULT = v + "--" ;
+		    :}
+		    | PRE_LOW_LEVEL_EXPRESSION:e1 {:
+			RESULT = e1;
+		    :}
+;
+
+PRE_LOW_LEVEL_EXPRESSION ::=  BRACE_L ELEMENTAL_TYPE:t BRACE_R LOW_LEVEL_EXPRESSION:e {: RESULT = "(" + t.toString() + ")" + e; :}
+			    | LOW_LEVEL_EXPRESSION:e {: RESULT = e; :}
+;
+
+LOW_LEVEL_EXPRESSION ::= BRACE_L EXPRESSION:e BRACE_R {:
+			   RESULT = "(" + e + ")";
+			:}
+			|LITERAL:l {:
+			    RESULT = l.toCustomString();
+			:}
+			| VALUE_NULL:n {:
+			    RESULT = n;
+			:}			
+			| $ID:fid BRACE_L BRACE_R {: //Function Call
+			    RESULT = fid.getValue() + "()";
+			:}
+			| $ID:fid BRACE_L EXPRESSION_LIST:el BRACE_R {: //Function Call
+			    RESULT =  fid.getValue() + "(" + el + ")";
+			:}
+			| $ID:obj DOT $ID:fid BRACE_L EXPRESSION_LIST:el BRACE_R {: //Function Call
+			    RESULT = obj.getValue() + "." + fid.getValue() + "(" + el + ")";
+			:}
+			| $ID:obj DOT $ID:fid BRACE_L BRACE_R {: //Function Call
+			    RESULT = obj.getValue() + "." + fid.getValue() + "()";
+			:}
+			| VARIABLE_RETRIEVAL:v {: // ID or ID[] or ID.ID
+			    RESULT = v.getValue();
+			:}
+			| $ID:obj DOT VARIABLE_RETRIEVAL:v {: // ID or ID[] or ID.ID
+			    RESULT = obj.getValue() + "." + v.getValue();
+			:}
+			| KEYWORD_NEW $ID:fid BRACE_L EXPRESSION_LIST:el BRACE_R {: 
+			    RESULT = "new " + fid.getValue() + "(" + el + ")";
+			:}
+			| KEYWORD_NEW $ID:fid BRACE_L BRACE_R {: 
+			    RESULT = "new " + fid.getValue() + "()";
+			:}
+			| KEYWORD_NEW $ID:id  BRAKET_L EXPRESSION:e BRAKET_R {: 
+			    RESULT = "new " + id.getValue() + "[" + e + "]";
+			:}
+;
+
+EXPRESSION_LIST ::= EXPRESSION_LIST:el COMMA EXPRESSION:e {:
+		      RESULT = el + "," + e;
+		  :}
+		  | EXPRESSION:e {:
+		      RESULT = e;		      
+		  :}
+;
+
+TYPE ::= ELEMENTAL_TYPE:et {: RESULT = et; :}
+	| $ID:d {:
+	    Type t = Type._Object_;
+	    t.setSpecification(d.toString());
+	    d.setType(t);
+	    RESULT = d;
+	:}
+
+;
+
+ELEMENTAL_TYPE ::= TYPE_BOOL {:
+	    RESULT = new CustomSymbol ( (Symbol) CUP$RCParser$stack.peek(), "boolean", Type._Boolean_ ) ;
+	:}
+	| TYPE_INT {:
+	    RESULT = new CustomSymbol ( (Symbol) CUP$RCParser$stack.peek(), "int", Type._Integer_ ) ;
+	:}
+	| TYPE_STRING {:
+	    RESULT = new CustomSymbol ( (Symbol) CUP$RCParser$stack.peek(), "String", Type._String_ ) ;
+	:}
+	| TYPE_FLOAT {:
+	    RESULT = new CustomSymbol ( (Symbol) CUP$RCParser$stack.peek(), "float", Type._Float_ ) ;
+	:}
+	| TYPE_CHAR {:
+	    RESULT = new CustomSymbol ( (Symbol) CUP$RCParser$stack.peek(), "char", Type._Char_ ) ;
+	:}
+	| TYPE_VOID {:
+	    RESULT = new CustomSymbol ( (Symbol) CUP$RCParser$stack.peek(), "void", Type._Void_ ) ;
+	:}
+;
+
+VARIABLE_RETRIEVAL ::= $ID:id {: //Single value
+			id.setType(Type.id);
+			RESULT = id;
+		    :}
+		    | $ID:id BRAKET_L EXPRESSION:e BRAKET_R {: //Array
+			id.setType(Type._Array_);
+			id.setValue(id.getValue() + "[" + e + "]");
+			RESULT = id;
+		    :}
+;
+
+LITERAL ::= VALUE_STRING {:
+	      Symbol temp = (Symbol) CUP$RCParser$stack.peek();
+	      RESULT = new CustomSymbol<String>( temp, temp.value.toString(), Type._String_ );
+	  :}	  
+	  | VALUE_BOOLEAN {:
+	      Symbol temp = (Symbol) CUP$RCParser$stack.peek();
+	      RESULT = new CustomSymbol<Boolean>( temp, (Boolean) temp.value, Type._Boolean_ );
+	  :}
+	  | VALUE_INT {:
+	      Symbol temp = (Symbol) CUP$RCParser$stack.peek();
+	      RESULT = new CustomSymbol<Integer>( temp, (Integer) temp.value, Type._Integer_ );
+	  :}
+	  | VALUE_FLOAT {:
+	      Symbol temp = (Symbol) CUP$RCParser$stack.peek();
+	      RESULT = new CustomSymbol<Float>( temp, (Float) temp.value, Type._Float_ );
+	  :}
+;
+
+$ID ::= ID {:
+	    Symbol temp = (Symbol) CUP$RCParser$stack.peek();
+	    RESULT = new CustomSymbol<String>( temp , temp.value.toString() , Type.id );
+	   :}
+;
